@@ -42,6 +42,8 @@
 //! ```
 pub struct XORCryptor {
     cipher: Vec<u8>,
+    e_table: Vec<u8>,
+    d_table: Vec<u8>,
 }
 
 impl XORCryptor {
@@ -75,7 +77,13 @@ impl XORCryptor {
         for i in 0..cipher.len() {
             cipher[i] = XORCryptor::generate_mask(cipher[i]);
         }
-        Ok(XORCryptor { cipher })
+        let (mut e_table, mut d_table) = (vec![0u8; 256], vec![0u8; 256]);
+        XORCryptor::generate_table(&mut e_table, &mut d_table);
+        Ok(XORCryptor {
+            cipher,
+            e_table,
+            d_table,
+        })
     }
 
     fn generate_mask(v: u8) -> u8 {
@@ -89,7 +97,7 @@ impl XORCryptor {
         return mask ^ v;
     }
 
-    fn generate_table(&self, table: &mut Vec<u8>, to_encrypt: bool) {
+    fn generate_table(e_table: &mut Vec<u8>, d_table: &mut Vec<u8>) {
         let (mut count, mut shift, mut value, mut bit_mask): (u8, u8, u8, u8);
         let (mut mask, mut mode) = (0u8, 0u8);
         for i in 0..=255 as u8 {
@@ -109,30 +117,27 @@ impl XORCryptor {
                 value >>= 2;
             }
             mask = (mask << 4) | mode;
-            if to_encrypt {
-                table[i as usize] = mask;
-            } else {
-                table[mask as usize] = i;
-            }
+            e_table[i as usize] = mask;
+            d_table[mask as usize] = i;
             (mask, mode) = (0u8, 0u8);
         }
     }
 
-    fn encrypt_bytes(&self, src: &mut Vec<u8>, table: &Vec<u8>) {
+    fn encrypt_bytes(&self, src: &mut Vec<u8>) {
         let (mut i, cipher_len) = (0 as usize, self.cipher.len());
         let (mut mask, mut mode) = (0u8, 0u8);
         loop {
             if (i & 1) == 1 {
-                mask |= table[src[i] as usize] & 0xF0;
-                mode |= (table[src[i] as usize] & 0xF) << 4;
+                mask |= self.e_table[src[i] as usize] & 0xF0;
+                mode |= (self.e_table[src[i] as usize] & 0xF) << 4;
                 mode ^= mask;
 
                 src[i] = mode ^ self.cipher[i % cipher_len];
                 src[i - 1] = mask ^ self.cipher[(i - 1) % cipher_len];
                 (mask, mode) = (0u8, 0u8);
             } else {
-                mask |= table[src[i] as usize] >> 4;
-                mode |= table[src[i] as usize] & 0xF;
+                mask |= self.e_table[src[i] as usize] >> 4;
+                mode |= self.e_table[src[i] as usize] & 0xF;
             }
 
             i += 1;
@@ -147,7 +152,7 @@ impl XORCryptor {
         }
     }
 
-    fn decrypt_bytes(&self, src: &mut Vec<u8>, table: &Vec<u8>) {
+    fn decrypt_bytes(&self, src: &mut Vec<u8>) {
         let (mut i, mut k, cipher_len, last) =
             (0 as usize, 0 as usize, self.cipher.len(), src.len() - 1);
         let odd = (src.len() & 1) == 1;
@@ -163,12 +168,12 @@ impl XORCryptor {
                 mode = src[i] ^ self.cipher[i % cipher_len];
                 mode ^= mask;
 
-                src[k] = table[(((mask & 0xF) << 4) | (mode & 0xF)) as usize];
+                src[k] = self.d_table[(((mask & 0xF) << 4) | (mode & 0xF)) as usize];
                 k += 1;
                 mask >>= 4;
                 mode >>= 4;
             }
-            src[k] = table[(((mask & 0xF) << 4) | (mode & 0xF)) as usize];
+            src[k] = self.d_table[(((mask & 0xF) << 4) | (mode & 0xF)) as usize];
             k += 1;
 
             i += 1;
@@ -183,10 +188,7 @@ impl XORCryptor {
         if buffer.is_empty() {
             return;
         }
-
-        let mut table = vec![0u8; 256];
-        self.generate_table(&mut table, true);
-        self.encrypt_bytes(buffer, &table);
+        self.encrypt_bytes(buffer);
     }
 
     /// Decrypts the vector
@@ -194,9 +196,6 @@ impl XORCryptor {
         if buffer.is_empty() {
             return;
         }
-
-        let mut table = vec![0u8; 256];
-        self.generate_table(&mut table, false);
-        self.decrypt_bytes(buffer, &table);
+        self.decrypt_bytes(buffer);
     }
 }
