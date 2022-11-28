@@ -1,6 +1,6 @@
 # XORCryptor Lib
 
-Library for encrypting and decrypting using XOR bitwise operation
+Algorithm for encrypting and decrypting based on XOR bitwise operation
 
 [About algorithm](https://github.com/shank03/XORCryptorLib/blob/main/About.md)
 
