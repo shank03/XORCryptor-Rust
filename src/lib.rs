@@ -198,4 +198,8 @@ impl XORCryptor {
         }
         self.decrypt_bytes(buffer);
     }
+
+    pub fn get_cipher(&self) -> &Vec<u8> {
+        &self.cipher
+    }
 }
