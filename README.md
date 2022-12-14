@@ -9,37 +9,69 @@ Algorithm for encrypting and decrypting based on XOR bitwise operation
 
 ## Usage
 
+#### For 64 bit CPU:
 ```rust
 use xor_cryptor::XORCryptor;
 
 fn main() {
     let sample_text = String::from("Hello World !");
     let key = String::from("secret_key");
+    let buffer = sample_text.as_bytes().to_vec();
 
-    let mut buffer = sample_text.as_bytes().to_vec();
     let res = XORCryptor::new(&key);
-    if res.is_ok() {
-        let xrc = res.unwrap();
-        xrc.encrypt_vec(&mut buffer);
-
-        let encrypted_string = String::from_utf8_lossy(&buffer);
-        println!("Encrypted: {}\n", encrypted_string);
-
-        // This encrypted string contains formatted non-utf8 characters
-        // Do not use this string as vector to decrypt
-        let mut d_buff = encrypted_string.as_bytes().to_vec();
-        xrc.decrypt_vec(&mut d_buff);
-        println!(
-            "Decrypted from string : {:?}",
-            String::from_utf8_lossy(&d_buff)
-        );
-
-        xrc.decrypt_vec(&mut buffer);
-        println!(
-            "Decrypted from vec    : {:?}",
-            String::from_utf8_lossy(&buffer)
-        );
+    if res.is_err() {
+        return;
     }
+    let xrc = res.unwrap();
+
+    let encrypted_buffer = xrc.encrypt_vec(buffer);
+    let encrypted_string = String::from_utf8_lossy(&encrypted_buffer);
+    println!("Encrypted: {}\n", encrypted_string);
+
+    // This encrypted string contains formatted non-utf8 characters
+    // Do not use this string as vector to decrypt
+    let decrypted_buffer = xrc.decrypt_vec(encrypted_string.as_bytes().to_vec());
+    println!(
+        "Decrypted from string : {:?}",
+        String::from_utf8_lossy(&decrypted_buffer)
+    );
+
+    let decrypted_buffer = xrc.decrypt_vec(encrypted_buffer);
+    println!(
+        "Decrypted from vec    : {:?}",
+        String::from_utf8_lossy(&decrypted_buffer)
+    );
+}
+```
+
+#### For rest:
+
+```rust
+use xor_cryptor::XORCryptor;
+
+fn main() {
+   let sample_text = String::from("Hello World !");
+   let key = String::from("secret_key");
+
+   let mut buffer = sample_text.as_bytes().to_vec();
+   let res = XORCryptor::new(&key);
+   if res.is_err() {
+       return;
+   }
+   let xrc = res.unwrap();
+   xrc.encrypt_vec(&mut buffer);
+
+   let encrypted_string = String::from_utf8_lossy(&buffer);
+   println!("Encrypted: {}\n", encrypted_string);
+
+   // This encrypted string contains formatted non-utf8 characters
+   // Do not use this string as vector to decrypt
+   let mut d_buff = encrypted_string.as_bytes().to_vec();
+   xrc.decrypt_vec(&mut d_buff);
+   println!("Decrypted from string : {:?}", String::from_utf8_lossy(&d_buff));
+
+   xrc.decrypt_vec(&mut buffer);
+   println!("Decrypted from vec    : {:?}", String::from_utf8_lossy(&buffer));
 }
 ```
 
