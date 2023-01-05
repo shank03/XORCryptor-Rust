@@ -82,7 +82,7 @@
 
 #[cfg(target_pointer_width = "64")]
 pub struct XORCryptor {
-    cipher: Cipher,
+    cipher: cipher::Cipher,
     e_table: Vec<u64>,
     d_table: Vec<u64>,
 }
@@ -91,7 +91,7 @@ pub struct XORCryptor {
 impl XORCryptor {
     /// Initialize with the key
     pub fn new(key: &String) -> Result<Self, &str> {
-        let cipher = Cipher::from(key)?;
+        let cipher = cipher::Cipher::from(key)?;
         let (mut e_table, mut d_table) = (vec![0u64; 256], vec![0u64; 0xF10]);
         XORCryptor::generate_table(&mut e_table, &mut d_table);
         Ok(XORCryptor {
@@ -150,7 +150,7 @@ impl XORCryptor {
             }
             lxi |= rxi;
             lxi = ((lxi & 0x00FF_00FF_00FF_00FFu64) << 8u64) ^ lxi;
-            src[i] = lxi ^ self.cipher.cipher_u64[i % self.cipher.cipher_len];
+            src[i] = lxi ^ self.cipher.get_cipher_byte(i);
             if byte_count == 0 {
                 break;
             }
@@ -160,7 +160,7 @@ impl XORCryptor {
     fn decrypt_bytes(&self, src: &mut Vec<u64>, length: usize, b_len: usize) {
         let mut byte_count = b_len;
         for i in 0..length {
-            src[i] ^= self.cipher.cipher_u64[i % self.cipher.cipher_len];
+            src[i] ^= self.cipher.get_cipher_byte(i);
             let xi = ((src[i] & 0x00FF_00FF_00FF_00FFu64) << 8u64) ^ src[i];
             let (mut lxi, mut rxi, mut shift) = (0u64, 0u64, 0u64);
             while shift != 64 {
@@ -223,73 +223,84 @@ impl XORCryptor {
     }
 
     pub fn get_cipher(&self) -> &Vec<u8> {
-        &self.cipher.cipher_u8
+        &self.cipher.get_cipher()
     }
 }
 
 #[cfg(target_pointer_width = "64")]
-struct Cipher {
-    cipher_u8: Vec<u8>,
-    cipher_u64: Vec<u64>,
-    cipher_len: usize,
-}
-
-#[cfg(target_pointer_width = "64")]
-impl Cipher {
-    fn from(key: &String) -> Result<Self, &str> {
-        if key.len() < 6 {
-            return Err("Key length less than 6");
-        }
-        let (cipher_u8, mut cipher_u64, cipher_len) = Cipher::x64_cipher(key.as_bytes().to_vec());
-        for i in 0..cipher_len {
-            cipher_u64[i] = Cipher::generate_mask(cipher_u64[i]);
-        }
-        Ok(Cipher {
-            cipher_u8,
-            cipher_u64,
-            cipher_len,
-        })
+mod cipher {
+    pub struct Cipher {
+        cipher_u8: Vec<u8>,
+        cipher_u64: Vec<u64>,
+        cipher_len: usize,
     }
 
-    fn generate_mask(v: u64) -> u64 {
-        let (mask, mut vt, mut shift) = (0x0101_0101_0101_0101u64, v, 8u64);
-        let (mut bv, mut bz) = (0u64, 0x0808_0808_0808_0808u64);
-        let mut bm: u64;
-        while shift != 0 {
-            bm = mask & vt;
-            bv += bm;
-            bz -= bm;
-            vt >>= 1;
-            shift -= 1;
+    #[cfg(target_pointer_width = "64")]
+    impl Cipher {
+        pub fn from(key: &String) -> Result<Self, &str> {
+            if key.len() < 6 {
+                return Err("Key length less than 6");
+            }
+            let (cipher_u8, mut cipher_u64, cipher_len) =
+                Cipher::x64_cipher(key.as_bytes().to_vec());
+            for i in 0..cipher_len {
+                cipher_u64[i] = Cipher::generate_mask(cipher_u64[i]);
+            }
+            Ok(Cipher {
+                cipher_u8,
+                cipher_u64,
+                cipher_len,
+            })
         }
-        ((bz << 4) | bv) ^ ((bv << 4) | bz) ^ v
-    }
 
-    fn x64_cipher(arr: Vec<u8>) -> (Vec<u8>, Vec<u64>, usize) {
-        let (rep, mut idx) = (
-            {
-                let (mut x, mut y) = (arr.len(), 8);
-                while y != 0 {
-                    let temp = y;
-                    y = x % y;
-                    x = temp;
-                }
-                (arr.len() / x) * 8
-            },
-            0usize,
-        );
-        let (mut data, mut data64) = (vec![0u8; rep], vec![0u8; rep]);
-        while idx != rep {
-            data[idx] = arr[idx % arr.len()];
-            idx += 1;
+        pub fn get_cipher_byte(&self, i: usize) -> u64 {
+            self.cipher_u64[i % self.cipher_len]
         }
-        data64.copy_from_slice(&data[..]);
-        unsafe {
-            (
-                data,
-                std::mem::transmute::<Vec<u8>, Vec<u64>>(data64),
-                rep / 8,
-            )
+
+        pub fn get_cipher(&self) -> &Vec<u8> {
+            &self.cipher_u8
+        }
+
+        fn generate_mask(v: u64) -> u64 {
+            let (mask, mut vt, mut shift) = (0x0101_0101_0101_0101u64, v, 8u64);
+            let (mut bv, mut bz) = (0u64, 0x0808_0808_0808_0808u64);
+            let mut bm: u64;
+            while shift != 0 {
+                bm = mask & vt;
+                bv += bm;
+                bz -= bm;
+                vt >>= 1;
+                shift -= 1;
+            }
+            ((bz << 4) | bv) ^ ((bv << 4) | bz) ^ v
+        }
+
+        fn x64_cipher(arr: Vec<u8>) -> (Vec<u8>, Vec<u64>, usize) {
+            let (rep, mut idx) = (
+                {
+                    let (mut x, mut y) = (arr.len(), 8);
+                    while y != 0 {
+                        let temp = y;
+                        y = x % y;
+                        x = temp;
+                    }
+                    (arr.len() / x) * 8
+                },
+                0usize,
+            );
+            let (mut data, mut data64) = (vec![0u8; rep], vec![0u8; rep]);
+            while idx != rep {
+                data[idx] = arr[idx % arr.len()];
+                idx += 1;
+            }
+            data64.copy_from_slice(&data[..]);
+            unsafe {
+                (
+                    data,
+                    std::mem::transmute::<Vec<u8>, Vec<u64>>(data64),
+                    rep / 8,
+                )
+            }
         }
     }
 }
