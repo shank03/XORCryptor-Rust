@@ -240,13 +240,13 @@ impl Cipher {
         if key.len() < 6 {
             return Err("Key length less than 6");
         }
-        let (mut cipher, cipher_len) = Cipher::x64_cipher(key.as_bytes().to_vec());
+        let (cipher_u8, mut cipher_u64, cipher_len) = Cipher::x64_cipher(key.as_bytes().to_vec());
         for i in 0..cipher_len {
-            cipher[i] = Cipher::generate_mask(cipher[i]);
+            cipher_u64[i] = Cipher::generate_mask(cipher_u64[i]);
         }
         Ok(Cipher {
-            cipher_u8: Cipher::get_cipher_u8(&cipher, key.len()),
-            cipher_u64: cipher,
+            cipher_u8,
+            cipher_u64,
             cipher_len,
         })
     }
@@ -265,7 +265,7 @@ impl Cipher {
         ((bz << 4) | bv) ^ ((bv << 4) | bz) ^ v
     }
 
-    fn x64_cipher(arr: Vec<u8>) -> (Vec<u64>, usize) {
+    fn x64_cipher(arr: Vec<u8>) -> (Vec<u8>, Vec<u64>, usize) {
         let (rep, mut idx) = (
             {
                 let (mut x, mut y) = (arr.len(), 8);
@@ -278,32 +278,19 @@ impl Cipher {
             },
             0usize,
         );
-        let mut data = Vec::<u8>::new();
+        let (mut data, mut data64) = (vec![0u8; rep], vec![0u8; rep]);
         while idx != rep {
-            data.push(arr[idx % arr.len()]);
+            data[idx] = arr[idx % arr.len()];
             idx += 1;
         }
-        let length = if data.len() % 8 == 0 {
-            data.len() / 8
-        } else {
-            (data.len() + 8) / 8
-        };
-        unsafe { (std::mem::transmute::<Vec<u8>, Vec<u64>>(data), length) }
-    }
-
-    fn get_cipher_u8(cipher_u64: &Vec<u64>, length: usize) -> Vec<u8> {
-        let mut cipher_u8 = Vec::<u8>::new();
-        let (mut bytes, mut idx, mut shift) = (length, 0usize, 0usize);
-        while bytes != 0 {
-            cipher_u8.push(((cipher_u64[idx] >> shift) & 0xFF) as u8);
-            bytes -= 1;
-            shift += 8;
-            if shift == 64 {
-                shift = 0;
-                idx += 1;
-            }
+        data64.copy_from_slice(&data[..]);
+        unsafe {
+            (
+                data,
+                std::mem::transmute::<Vec<u8>, Vec<u64>>(data64),
+                rep / 8,
+            )
         }
-        cipher_u8
     }
 }
 
@@ -510,6 +497,7 @@ mod test {
             Ok(xrc) => {
                 let buffer = xrc.encrypt_vec(buffer);
                 let buffer = xrc.decrypt_vec(buffer);
+                assert_eq!(xrc.get_cipher().len(), 40);
                 assert_eq!(sample_text, String::from_utf8(buffer).unwrap());
             }
             Err(err) => println!("Error {}", err),
