@@ -521,4 +521,44 @@ mod test {
             Err(err) => println!("Error {}", err),
         }
     }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn benchmark() {
+        let sample_text = String::from("Hello Wo");
+        let key = String::from("secret_key");
+
+        // 128 MB * 8 chars = 1 GB
+        const BENCH_SIZE: usize = 1024usize * 1024usize * 128usize;
+        let text = sample_text.as_bytes().to_vec();
+
+        let start = std::time::Instant::now();
+        let mut buffer = Vec::<u8>::new();
+        for _ in 0..BENCH_SIZE {
+            for i in 0..text.len() {
+                buffer.push(text[i]);
+            }
+        }
+        println!("Buf - 1GB: {} ms", start.elapsed().as_millis());
+
+        let xrc = XORCryptor::new(&key);
+        match xrc {
+            Ok(xrc) => {
+                let start = std::time::Instant::now();
+                let buffer = xrc.encrypt_vec(buffer);
+                println!("Encrypted: {} ms", start.elapsed().as_millis());
+
+                let start = std::time::Instant::now();
+                let buffer = xrc.decrypt_vec(buffer);
+                println!("Decrypted: {} ms", start.elapsed().as_millis());
+
+                assert_eq!(xrc.get_cipher().len(), key.len());
+                assert_eq!(
+                    sample_text,
+                    String::from_utf8(buffer[0..8].to_vec()).unwrap()
+                );
+            }
+            Err(err) => println!("Error {}", err),
+        }
+    }
 }
