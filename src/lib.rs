@@ -50,6 +50,8 @@
 //! Decrypted from vec   : "Hello World !"
 //! ```
 
+use std::{any::TypeId, mem};
+
 #[cfg(target_pointer_width = "64")]
 pub struct XORCryptor {
     cipher: cipher::Cipher,
@@ -96,9 +98,9 @@ impl XORCryptor {
         }
     }
 
-    fn encrypt_bytes(&self, src: &mut Vec<u64>, length: usize, b_len: usize) {
+    fn encrypt_bytes(&self, src: &mut Vec<u64>, b_len: usize) {
         let mut byte_count = b_len;
-        for i in 0..length {
+        for i in 0..src.len() {
             let (val, mut shift) = (src[i], 0u64);
             let (mut lxi, mut rxi) = (0u64, 0u64);
             while shift != 64 {
@@ -127,9 +129,9 @@ impl XORCryptor {
         }
     }
 
-    fn decrypt_bytes(&self, src: &mut Vec<u64>, length: usize, b_len: usize) {
+    fn decrypt_bytes(&self, src: &mut Vec<u64>, b_len: usize) {
         let mut byte_count = b_len;
-        for i in 0..length {
+        for i in 0..src.len() {
             src[i] ^= self.cipher.get_cipher_byte(i);
             let xi = ((src[i] & 0x00FF_00FF_00FF_00FFu64) << 8u64) ^ src[i];
             let (mut lxi, mut rxi, mut shift) = (0u64, 0u64, 0u64);
@@ -156,22 +158,57 @@ impl XORCryptor {
         }
     }
 
+    /// Transmutes buffer from Vec<u8> to Vec<u64> and vice-versa
+    fn transmute_buffer<T: Sized + 'static, R: Sized + 'static>(
+        &self,
+        buffer: Vec<T>,
+        b_len: usize,
+    ) -> Vec<R> {
+        let (t, r) = (TypeId::of::<T>(), TypeId::of::<R>());
+        let (t8, t64) = (TypeId::of::<u8>(), TypeId::of::<u64>());
+
+        if (t != t8 || r != t64) && (t != t64 || r != t8) {
+            return vec![];
+        }
+
+        let from_u8_u64 = t == t8 && r == t64;
+        let length = if from_u8_u64 {
+            if buffer.len() % 8 == 0 {
+                buffer.len() / 8
+            } else {
+                (buffer.len() + 8) / 8
+            }
+        } else {
+            buffer.len() * 8
+        };
+
+        let mut data: Vec<R>;
+        // T and R are asserted to be either u8 or u64.
+        // The length and capacity are calculated above based on
+        // conversion of types.
+        // Creating vector using interpreted ptr and desired length
+        // will not crash.
+        unsafe {
+            let mutptr = buffer.as_ptr() as *mut R;
+            mem::forget(buffer);
+            data = Vec::from_raw_parts(mutptr, length, length)
+        }
+        if !from_u8_u64 && b_len != 0 {
+            // Remove additional padding
+            data.truncate(b_len);
+        }
+        data
+    }
+
     /// Encrypts the vector
     pub fn encrypt_vec(&self, buffer: Vec<u8>) -> Vec<u8> {
         if buffer.is_empty() {
             return vec![];
         }
         let b_len = buffer.len();
-        let length = if buffer.len() % 8 == 0 {
-            buffer.len() / 8
-        } else {
-            (buffer.len() + 8) / 8
-        };
-        unsafe {
-            let mut src = std::mem::transmute::<Vec<u8>, Vec<u64>>(buffer);
-            self.encrypt_bytes(&mut src, length, b_len);
-            std::mem::transmute::<Vec<u64>, Vec<u8>>(src)
-        }
+        let mut src = self.transmute_buffer::<u8, u64>(buffer, 0);
+        self.encrypt_bytes(&mut src, b_len);
+        self.transmute_buffer(src, b_len)
     }
 
     /// Decrypts the vector
@@ -180,27 +217,19 @@ impl XORCryptor {
             return vec![];
         }
         let b_len = buffer.len();
-        let length = if buffer.len() % 8 == 0 {
-            buffer.len() / 8
-        } else {
-            (buffer.len() + 8) / 8
-        };
-        unsafe {
-            let mut src = std::mem::transmute::<Vec<u8>, Vec<u64>>(buffer);
-            self.decrypt_bytes(&mut src, length, b_len);
-            std::mem::transmute::<Vec<u64>, Vec<u8>>(src)
-        }
+        let mut src = self.transmute_buffer::<u8, u64>(buffer, 0);
+        self.decrypt_bytes(&mut src, b_len);
+        self.transmute_buffer(src, b_len)
     }
 
-    pub fn get_cipher(&self) -> &Vec<u8> {
-        &self.cipher.get_cipher()
+    pub fn get_cipher(&self) -> Vec<u64> {
+        self.cipher.get_cipher()
     }
 }
 
 #[cfg(target_pointer_width = "64")]
 mod cipher {
     pub struct Cipher {
-        cipher_u8: Vec<u8>,
         cipher_u64: Vec<u64>,
         cipher_len: usize,
     }
@@ -216,7 +245,6 @@ mod cipher {
                 cipher_u64[i] = Cipher::generate_mask(cipher_u64[i]);
             }
             Ok(Cipher {
-                cipher_u8: Cipher::get_cipher_u8(&cipher_u64, key.len()),
                 cipher_u64,
                 cipher_len,
             })
@@ -226,8 +254,8 @@ mod cipher {
             self.cipher_u64[i % self.cipher_len]
         }
 
-        pub fn get_cipher(&self) -> &Vec<u8> {
-            &self.cipher_u8
+        pub fn get_cipher(&self) -> Vec<u64> {
+            self.cipher_u64.clone()
         }
 
         fn generate_mask(v: u64) -> u64 {
@@ -264,21 +292,6 @@ mod cipher {
             }
             unsafe { (std::mem::transmute::<Vec<u8>, Vec<u64>>(data), rep / 8) }
         }
-
-        fn get_cipher_u8(cipher_u64: &Vec<u64>, length: usize) -> Vec<u8> {
-            let mut cipher_u8 = Vec::<u8>::new();
-            let (mut bytes, mut idx, mut shift) = (length, 0usize, 0usize);
-            while bytes != 0 {
-                cipher_u8.push(((cipher_u64[idx] >> shift) & 0xFF) as u8);
-                bytes -= 1;
-                shift += 8;
-                if shift == 64 {
-                    shift = 0;
-                    idx += 1;
-                }
-            }
-            cipher_u8
-        }
     }
 }
 
@@ -286,11 +299,25 @@ mod cipher {
 mod test {
     use crate::*;
 
+    fn lcm(a: usize) -> usize {
+        let z = a.clone();
+        let (mut x, mut y) = (a, 8);
+        while y != 0 {
+            let temp = y;
+            y = x % y;
+            x = temp;
+        }
+        (z / x) * 8
+    }
+
     #[test]
     #[cfg(target_pointer_width = "64")]
     fn integrity_check() {
-        let sample_text = String::from("Hello World !");
-        let key = String::from("secret_key");
+        let sample_text = String::from("Hello World ! `1");
+        let key = String::from("secret_k");
+
+        assert_eq!(sample_text.len() % 8, 0);
+        assert_eq!(key.len() % 8, 0);
 
         let buffer = sample_text.as_bytes().to_vec();
         let xrc = XORCryptor::new(&key);
@@ -298,7 +325,29 @@ mod test {
             Ok(xrc) => {
                 let buffer = xrc.encrypt_vec(buffer);
                 let buffer = xrc.decrypt_vec(buffer);
-                assert_eq!(xrc.get_cipher().len(), key.len());
+                assert_eq!(xrc.get_cipher().len(), lcm(key.len()));
+                assert_eq!(sample_text, String::from_utf8(buffer).unwrap());
+            }
+            Err(err) => println!("Error {}", err),
+        }
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn integrity_check_padding() {
+        let sample_text = String::from("Hello World ! `1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,./~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:\"ZXCVBNM<>?");
+        let key = String::from("secret_key");
+
+        assert_ne!(sample_text.len() % 8, 0);
+        assert_ne!(key.len() % 8, 0);
+
+        let buffer = sample_text.as_bytes().to_vec();
+        let xrc = XORCryptor::new(&key);
+        match xrc {
+            Ok(xrc) => {
+                let buffer = xrc.encrypt_vec(buffer);
+                let buffer = xrc.decrypt_vec(buffer);
+                assert_eq!(xrc.get_cipher().len(), lcm(key.len()));
                 assert_eq!(sample_text, String::from_utf8(buffer).unwrap());
             }
             Err(err) => println!("Error {}", err),
@@ -308,10 +357,10 @@ mod test {
     #[test]
     #[cfg(target_pointer_width = "64")]
     fn benchmark() {
-        let sample_text = String::from("Hello Wo");
+        let sample_text = String::from("Hello World !");
         let key = String::from("secret_key");
 
-        // 128 MB * 8 chars = 1 GB
+        // 128 MB * 13 chars = 1.6 GB
         const BENCH_SIZE: usize = 1024usize * 1024usize * 128usize;
         let text = sample_text.as_bytes().to_vec();
 
@@ -322,7 +371,7 @@ mod test {
                 buffer.push(text[i]);
             }
         }
-        println!("Buf - 1GB: {} ms", start.elapsed().as_millis());
+        println!("Allocate Buff - 1.6 GB: {} ms", start.elapsed().as_millis());
 
         let xrc = XORCryptor::new(&key);
         match xrc {
@@ -335,10 +384,10 @@ mod test {
                 let buffer = xrc.decrypt_vec(buffer);
                 println!("Decrypted: {} ms", start.elapsed().as_millis());
 
-                assert_eq!(xrc.get_cipher().len(), key.len());
+                assert_eq!(xrc.get_cipher().len(), lcm(key.len()));
                 assert_eq!(
                     sample_text,
-                    String::from_utf8(buffer[0..8].to_vec()).unwrap()
+                    String::from_utf8(buffer[0..sample_text.len()].to_vec()).unwrap()
                 );
             }
             Err(err) => println!("Error {}", err),
