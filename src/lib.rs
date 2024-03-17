@@ -52,6 +52,8 @@
 
 use std::{any::TypeId, mem};
 
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
+
 #[cfg(target_pointer_width = "64")]
 pub struct XORCryptor {
     cipher: cipher::Cipher,
@@ -100,63 +102,87 @@ impl XORCryptor {
 
     fn encrypt_bytes(&self, src: &mut Vec<u64>, b_len: usize) {
         let mut byte_count = b_len;
-        let length = src.len();
-        for i in 0..length {
-            let (val, mut shift) = (src[i], 0u64);
-            let (mut lxi, mut rxi) = (0u64, 0u64);
-            while shift != 64 {
-                if byte_count == 1 {
-                    let mut mm = self.e_table[((val >> shift) & 0xFFu64) as usize];
-                    mm = ((mm & 0xF00u64) >> 8) | ((mm & 0xFu64) << 4);
-                    mm ^= mm >> 4;
-                    rxi |= mm << shift;
-                    break;
-                }
+        let odd = b_len % 8 != 0;
+        let length = src.len() - if odd { 1 } else { 0 };
+        let src_ptr = Ptr(src.as_mut_ptr());
 
-                rxi |= self.e_table[((val >> shift) & 0xFFu64) as usize] << shift;
-                lxi |= (self.e_table[(((val >> 8) >> shift) & 0xFFu64) as usize] << 4) << shift;
+        byte_count -= 8 * length;
+
+        (0..length).into_par_iter().for_each(move |i| unsafe {
+            let val = *{ src_ptr }.0.offset(i as isize);
+            let mut lxi = 0u64;
+
+            lxi |= self.e_table[(val & 0xFFu64) as usize]
+                | self.e_table[((val >> 0x8) & 0xFFu64) as usize] << 0x4
+                | self.e_table[((val >> 0x10) & 0xFFu64) as usize] << 0x10
+                | self.e_table[((val >> 0x18) & 0xFFu64) as usize] << 0x14
+                | self.e_table[((val >> 0x20) & 0xFFu64) as usize] << 0x20
+                | self.e_table[((val >> 0x28) & 0xFFu64) as usize] << 0x24
+                | self.e_table[((val >> 0x30) & 0xFFu64) as usize] << 0x30
+                | self.e_table[((val >> 0x38) & 0xFFu64) as usize] << 0x34;
+
+            lxi = ((lxi & 0x00FF_00FF_00FF_00FFu64) << 8u64) ^ lxi;
+            *{ src_ptr }.0.offset(i as isize) = lxi ^ self.cipher.get_cipher_byte(i);
+        });
+
+        if odd {
+            let (val, mut shift) = (src[length], 0u64);
+            let mut lxi = 0u64;
+            while byte_count > 1 {
+                lxi |= self.e_table[((val >> shift) & 0xFFu64) as usize] << shift
+                    | (self.e_table[(((val >> 8) >> shift) & 0xFFu64) as usize] << 4) << shift;
                 shift += 16;
                 byte_count -= 2;
-                if byte_count == 0 {
-                    break;
-                }
             }
-            lxi |= rxi;
+            let mut mm = self.e_table[((val >> shift) & 0xFFu64) as usize];
+            mm = ((mm & 0xF00u64) >> 8) | ((mm & 0xFu64) << 4);
+            mm ^= mm >> 4;
+            lxi |= mm << shift;
             lxi = ((lxi & 0x00FF_00FF_00FF_00FFu64) << 8u64) ^ lxi;
-            src[i] = lxi ^ self.cipher.get_cipher_byte(i);
-            if byte_count == 0 {
-                break;
-            }
+            src[length] = lxi ^ self.cipher.get_cipher_byte(length);
         }
     }
 
     fn decrypt_bytes(&self, src: &mut Vec<u64>, b_len: usize) {
         let mut byte_count = b_len;
-        let length = src.len();
-        for i in 0..length {
-            src[i] ^= self.cipher.get_cipher_byte(i);
-            let xi = ((src[i] & 0x00FF_00FF_00FF_00FFu64) << 8u64) ^ src[i];
-            let (mut lxi, mut rxi, mut shift) = (0u64, 0u64, 0u64);
-            while shift != 64 {
-                if byte_count == 1 {
-                    let mut mm = (xi >> shift) & 0xFF;
-                    mm ^= mm >> 4;
-                    mm = ((mm & 0xF0) >> 4) | ((mm & 0xF) << 8);
-                    lxi |= self.d_table[mm as usize] << shift;
-                    break;
-                }
-                lxi |= self.d_table[((xi >> shift) & 0x0F0Fu64) as usize] << shift;
-                rxi |= (self.d_table[(((xi >> shift) & 0xF0F0u64) >> 4) as usize] << 8) << shift;
-                shift += 16;
+        let odd = b_len % 8 != 0;
+        let length = src.len() - if odd { 1 } else { 0 };
+        let src_ptr = Ptr(src.as_mut_ptr());
+
+        byte_count -= 8 * length;
+
+        (0..length).into_par_iter().for_each(move |i| unsafe {
+            *{ src_ptr }.0.offset(i as isize) ^= self.cipher.get_cipher_byte(i);
+            let val = *{ src_ptr }.0.offset(i as isize);
+            let xi = ((val & 0x00FF_00FF_00FF_00FFu64) << 8u64) ^ val;
+            let mut lxi = 0u64;
+
+            lxi |= self.d_table[(xi & 0x0F0Fu64) as usize]
+                | self.d_table[((xi & 0xF0F0u64) >> 4) as usize] << 0x8
+                | self.d_table[((xi >> 0x10) & 0x0F0Fu64) as usize] << 0x10
+                | self.d_table[(((xi >> 0x10) & 0xF0F0u64) >> 4) as usize] << 0x18
+                | self.d_table[((xi >> 0x20) & 0x0F0Fu64) as usize] << 0x20
+                | self.d_table[(((xi >> 0x20) & 0xF0F0u64) >> 4) as usize] << 0x28
+                | self.d_table[((xi >> 0x30) & 0x0F0Fu64) as usize] << 0x30
+                | self.d_table[(((xi >> 0x30) & 0xF0F0u64) >> 4) as usize] << 0x38;
+
+            *{ src_ptr }.0.offset(i as isize) = lxi;
+        });
+        if odd {
+            src[length] ^= self.cipher.get_cipher_byte(length);
+            let xi = ((src[length] & 0x00FF_00FF_00FF_00FFu64) << 8u64) ^ src[length];
+            let (mut lxi, mut shift) = (0u64, 0u64);
+            while byte_count > 1 {
+                lxi |= self.d_table[((xi >> shift) & 0x0F0Fu64) as usize] << shift
+                    | (self.d_table[(((xi >> shift) & 0xF0F0u64) >> 4) as usize] << 8) << shift;
+                shift += 0x10;
                 byte_count -= 2;
-                if byte_count == 0 {
-                    break;
-                }
             }
-            src[i] = lxi | rxi;
-            if byte_count == 0 {
-                break;
-            }
+            let mut mm = (xi >> shift) & 0xFF;
+            mm ^= mm >> 4;
+            mm = ((mm & 0xF0) >> 4) | ((mm & 0xF) << 8);
+            lxi |= self.d_table[mm as usize] << shift;
+            src[length] = lxi;
         }
     }
 
@@ -239,6 +265,11 @@ impl XORCryptor {
         self.cipher.get_cipher()
     }
 }
+
+#[derive(Copy, Clone)]
+struct Ptr(*mut u64);
+unsafe impl Send for Ptr {}
+unsafe impl Sync for Ptr {}
 
 #[cfg(target_pointer_width = "64")]
 mod cipher {
@@ -443,6 +474,7 @@ mod test {
 
         // 128 MB * 13 chars = 1.6 GB
         const BENCH_SIZE: usize = 1024usize * 1024usize * 128usize;
+        const GB_SIZE: f64 = BENCH_SIZE as f64 * 13f64 / 1024f64 / 1024f64 / 1024f64;
         let text = sample_text.as_bytes().to_vec();
 
         let start = std::time::Instant::now();
@@ -452,18 +484,32 @@ mod test {
                 buffer.push(text[i]);
             }
         }
-        println!("Allocate Buff - 1.6 GB: {} ms", start.elapsed().as_millis());
+        println!(
+            "Allocate Buff - {:.2} GB: {} ms",
+            GB_SIZE,
+            start.elapsed().as_millis()
+        );
 
         let xrc = XORCryptor::new(&key);
         match xrc {
             Ok(xrc) => {
                 let start = std::time::Instant::now();
                 let buffer = xrc.encrypt_vec(buffer);
-                println!("Encrypted: {} ms", start.elapsed().as_millis());
+                let elapsed = start.elapsed().as_millis();
+                println!(
+                    "Encrypted: {} ms - {:.2} GBps",
+                    elapsed,
+                    GB_SIZE / elapsed as f64 * 1000f64
+                );
 
                 let start = std::time::Instant::now();
                 let buffer = xrc.decrypt_vec(buffer);
-                println!("Decrypted: {} ms", start.elapsed().as_millis());
+                let elapsed = start.elapsed().as_millis();
+                println!(
+                    "Decrypted: {} ms - {:.2} GBps",
+                    elapsed,
+                    GB_SIZE / elapsed as f64 * 1000f64
+                );
 
                 assert_eq!(xrc.get_cipher().len() * 8, lcm(key.len()));
                 assert_eq!(
