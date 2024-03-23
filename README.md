@@ -20,6 +20,8 @@ fn main() {
     let buffer = sample_text.as_bytes().to_vec();
 
     let res = XORCryptor::new(&key);
+    // or
+    let res = XORCryptor::new_bytes(key.as_bytes());
     if res.is_err() {
         return;
     }

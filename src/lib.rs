@@ -66,13 +66,22 @@ impl XORCryptor {
     /// Initialize with the key
     pub fn new(key: &String) -> Result<Self, &str> {
         let cipher = cipher::Cipher::from(key)?;
+        Ok(XORCryptor::init(cipher))
+    }
+
+    pub fn new_bytes(key: &[u8]) -> Result<Self, &str> {
+        let cipher = cipher::Cipher::from_bytes(key)?;
+        Ok(XORCryptor::init(cipher))
+    }
+
+    pub fn init(cipher: cipher::Cipher) -> Self {
         let (mut e_table, mut d_table) = (vec![0usize; 256], vec![0usize; 0xF10]);
         XORCryptor::generate_table(&mut e_table, &mut d_table);
-        Ok(XORCryptor {
+        XORCryptor {
             cipher,
             e_table,
             d_table,
-        })
+        }
     }
 
     fn generate_table(e_table: &mut Vec<usize>, d_table: &mut Vec<usize>) {
@@ -274,10 +283,18 @@ mod cipher {
     #[cfg(target_pointer_width = "64")]
     impl Cipher {
         pub fn from(key: &String) -> Result<Self, &str> {
+            Cipher::init(key.as_bytes().to_vec())
+        }
+
+        pub fn from_bytes(key: &[u8]) -> Result<Self, &'static str> {
+            Cipher::init(key.to_vec())
+        }
+
+        fn init(key: Vec<u8>) -> Result<Self, &'static str> {
             if key.len() < 6 {
                 return Err("Key length less than 6");
             }
-            let (mut cipher, cipher_len) = Cipher::x64_cipher(key.as_bytes().to_vec());
+            let (mut cipher, cipher_len) = Cipher::x64_cipher(key);
             for i in 0..cipher_len {
                 cipher[i] = Cipher::generate_mask(cipher[i]);
             }
@@ -407,6 +424,33 @@ mod test {
                 assert_eq!(plain_text_vector, decrypted_vector);
                 assert_ne!(plain_text_vector, encrypted_vector);
                 assert_eq!(key_vector, xrc.get_cipher());
+            }
+            Err(err) => println!("Error {}", err),
+        }
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn cross_key_functionality() {
+        let sample_text = String::from("Hello World !");
+        let key = String::from("secret_key");
+        let key_bytes = key.as_bytes();
+
+        let mut enc_buff: Vec<u8> = vec![];
+        let xrc = XORCryptor::new(&key);
+        match xrc {
+            Ok(xrc) => {
+                enc_buff = xrc.encrypt_vec(sample_text.as_bytes().to_vec());
+                assert!(enc_buff.len() == sample_text.len());
+            }
+            Err(err) => println!("Error {}", err),
+        }
+
+        let xrc = XORCryptor::new_bytes(&key_bytes);
+        match xrc {
+            Ok(xrc) => {
+                let dec_buff = xrc.decrypt_vec(enc_buff);
+                assert_eq!(sample_text, String::from_utf8(dec_buff).unwrap());
             }
             Err(err) => println!("Error {}", err),
         }
