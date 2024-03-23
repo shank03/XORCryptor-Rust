@@ -1,6 +1,7 @@
 #[cfg(test)]
 use crate::*;
 
+#[cfg(test)]
 fn lcm(a: usize) -> usize {
     let z = a.clone();
     let (mut x, mut y) = (a, 8);
