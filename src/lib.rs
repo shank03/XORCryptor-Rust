@@ -462,20 +462,18 @@ mod test {
     #[test]
     #[cfg(target_pointer_width = "64")]
     fn benchmark() {
-        let sample_text = String::from("Hello World !");
+        let sample_text = String::from("`1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,./~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:\"ZXCVBNM<>?");
         let key = String::from("secret_key");
 
-        // 128 MB * 13 chars = 1.6 GB
-        const BENCH_SIZE: usize = 1024usize * 1024usize * 128usize;
-        const GB_SIZE: f64 = BENCH_SIZE as f64 * 13f64 / 1024f64 / 1024f64 / 1024f64;
+        // 24 MB * 94 chars = 2.2 GB
+        const BENCH_SIZE: usize = 1024usize * 1024usize * 24usize;
+        const GB_SIZE: f64 = BENCH_SIZE as f64 * 94f64 / 1024f64 / 1024f64 / 1024f64;
         let text = sample_text.as_bytes().to_vec();
 
         let start = std::time::Instant::now();
-        let mut buffer = Vec::<u8>::new();
-        for _ in 0..BENCH_SIZE {
-            for i in 0..text.len() {
-                buffer.push(text[i]);
-            }
+        let mut buffer = vec![0u8; BENCH_SIZE * text.len()];
+        for i in 0..buffer.len() {
+            buffer[i] = text[i % text.len()];
         }
         println!(
             "Allocate Buff - {:.2} GB: {} ms",
