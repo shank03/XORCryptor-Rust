@@ -1,36 +1,48 @@
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha20Rng;
+
+use crate::err::{XRCError, XRCResult};
+
 #[cfg(target_pointer_width = "64")]
 pub struct Cipher {
     cipher: Vec<usize>,
-    cipher_len: usize,
 }
 
 #[cfg(target_pointer_width = "64")]
 impl Cipher {
-    pub fn from(key: &String) -> Result<Self, &str> {
-        Cipher::init(key.as_bytes().to_vec())
+    pub fn from(key: &str) -> XRCResult<Self> {
+        Cipher::init(key.as_bytes().to_vec(), None)
     }
 
-    pub fn from_bytes(key: &[u8]) -> Result<Self, &'static str> {
-        Cipher::init(key.to_vec())
+    pub fn from_bytes(key: &[u8]) -> XRCResult<Self> {
+        Cipher::init(key.to_vec(), None)
     }
 
-    fn init(key: Vec<u8>) -> Result<Self, &'static str> {
+    pub fn from_seed(key: &[u8], seed: u64) -> XRCResult<Self> {
+        Cipher::init(key.to_vec(), Some(seed))
+    }
+
+    fn init(key: Vec<u8>, seed: Option<u64>) -> XRCResult<Self> {
         if key.len() < 6 {
-            return Err("Key length less than 6");
+            return Err(XRCError::InvalidKeyLength);
         }
-        let (mut cipher, cipher_len) = Cipher::x64_cipher(key);
-        for i in 0..cipher_len {
+        let mut cipher = if let Some(seed) = seed {
+            Cipher::x64_cipher_seed(key, seed)
+        } else {
+            Cipher::x64_cipher(key)
+        };
+        for i in 0..cipher.len() {
             cipher[i] = Cipher::generate_mask(cipher[i]);
         }
-        Ok(Cipher { cipher, cipher_len })
+        Ok(Cipher { cipher })
     }
 
     pub fn get_cipher_byte(&self, i: usize) -> usize {
-        self.cipher[i % self.cipher_len]
+        self.cipher[i % self.cipher.len()]
     }
 
-    pub fn get_cipher(&self) -> Vec<usize> {
-        self.cipher.clone()
+    pub fn get_cipher(&self) -> &[usize] {
+        &self.cipher
     }
 
     fn generate_mask(v: usize) -> usize {
@@ -47,7 +59,7 @@ impl Cipher {
         ((bz << 4) | bv) ^ ((bv << 4) | bz) ^ v
     }
 
-    fn x64_cipher(arr: Vec<u8>) -> (Vec<usize>, usize) {
+    fn x64_cipher(arr: Vec<u8>) -> Vec<usize> {
         let (rep, mut idx) = (
             {
                 let (mut x, mut y) = (arr.len(), 8);
@@ -67,7 +79,29 @@ impl Cipher {
         }
         unsafe {
             let (_, cipher_64, _) = data.align_to::<usize>();
-            (cipher_64.to_vec(), rep / 8)
+            cipher_64.to_vec()
+        }
+    }
+
+    fn x64_cipher_seed(arr: Vec<u8>, seed: u64) -> Vec<usize> {
+        let rep = {
+            let (mut x, mut y) = (arr.len(), 8);
+            while y != 0 {
+                let temp = y;
+                y = x % y;
+                x = temp;
+            }
+            (arr.len() / x) * 8
+        };
+
+        let mut rng = ChaCha20Rng::seed_from_u64(seed);
+        let mut data = vec![0u8; rep];
+        for i in 0..rep {
+            data[i] = arr[rng.gen_range(0..arr.len())];
+        }
+        unsafe {
+            let (_, cipher_64, _) = data.align_to::<usize>();
+            cipher_64.to_vec()
         }
     }
 }

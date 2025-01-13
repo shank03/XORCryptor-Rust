@@ -203,3 +203,142 @@ fn benchmark() {
         Err(err) => println!("Error {}", err),
     }
 }
+
+mod v2 {
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn test_vectors() {
+        let sample_text = String::from(
+            "4c6f72656d20697073756d20646f6c6f722073697420616d65742c20636f6e73656374657475722061646970697363696e6720656c69742c2073656420646f20656975736d6f642074656d706f7220696e6369646964756e74207574206c61626f726520657420646f6c6f7265206d61676e6120616c697175612e0a",
+        );
+        let key = String::from("01020304050607080");
+
+        let plain_text_vector = sample_text.as_bytes().to_vec();
+
+        let encrypted_vector =
+            super::XORCryptor::encrypt_v2(key.as_bytes(), plain_text_vector.clone())
+                .expect("Failed encryption");
+
+        let decrypted_vector =
+            super::XORCryptor::decrypt_v2(key.as_bytes(), encrypted_vector.clone())
+                .expect("Failed decryption");
+        assert_eq!(plain_text_vector, decrypted_vector);
+        assert_ne!(plain_text_vector, encrypted_vector);
+
+        // Not application as it is now seeded randomly
+        // assert_eq!(key_vector, xrc.get_cipher());
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn cross_key_functionality() {
+        use super::XORCryptor;
+
+        let sample_text = String::from("Hello World !");
+        let key = String::from("secret_key");
+
+        let mut enc_buff: Vec<u8> = vec![];
+        match XORCryptor::encrypt_v2(key.as_bytes(), sample_text.as_bytes().to_vec()) {
+            Ok(eb) => {
+                enc_buff = eb;
+                assert!(enc_buff.len() % 8 == 0);
+            }
+            Err(err) => println!("Error {}", err),
+        }
+
+        match XORCryptor::decrypt_v2(key.as_bytes(), enc_buff) {
+            Ok(dec_buff) => {
+                assert_eq!(sample_text, String::from_utf8(dec_buff).unwrap());
+            }
+            Err(err) => println!("Error {}", err),
+        }
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn integrity_check() {
+        use super::XORCryptor;
+
+        let sample_text = String::from("Hello World ! `1");
+        let key = String::from("secret_k");
+
+        assert_eq!(sample_text.len() % 8, 0);
+        assert_eq!(key.len() % 8, 0);
+
+        let buffer = sample_text.as_bytes().to_vec();
+
+        let buffer = XORCryptor::encrypt_v2(key.as_bytes(), buffer).expect("Failed encrpytion");
+        let buffer = XORCryptor::decrypt_v2(key.as_bytes(), buffer).expect("Failed decryption");
+        assert_eq!(sample_text, String::from_utf8(buffer).unwrap());
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn integrity_check_padding() {
+        use super::XORCryptor;
+
+        let mut sample_text = String::from("Hello World ! `1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,./~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:\"ZXCVBNM<>?#2f");
+        let key = String::from("secret_key");
+
+        while sample_text.len() % 8 != 0 {
+            assert_ne!(sample_text.len() % 8, 0);
+            assert_ne!(key.len() % 8, 0);
+
+            let buffer = sample_text.as_bytes().to_vec();
+
+            let buffer = XORCryptor::encrypt_v2(key.as_bytes(), buffer).expect("Failed encryption");
+            let buffer = XORCryptor::decrypt_v2(key.as_bytes(), buffer).expect("Failed decryption");
+
+            assert_eq!(sample_text, String::from_utf8(buffer).unwrap());
+            sample_text.pop();
+        }
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn benchmark() {
+        use super::XORCryptor;
+
+        let sample_text = String::from("`1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,./~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:\"ZXCVBNM<>?");
+        let key = String::from("secret_key");
+
+        // 24 MB * 94 chars = 2.2 GB
+        const BENCH_SIZE: usize = 1024usize * 1024usize * 24usize;
+        const GB_SIZE: f64 = BENCH_SIZE as f64 * 94f64 / 1024f64 / 1024f64 / 1024f64;
+        let text = sample_text.as_bytes().to_vec();
+
+        let start = std::time::Instant::now();
+        let mut buffer = vec![0u8; BENCH_SIZE * text.len()];
+        for i in 0..buffer.len() {
+            buffer[i] = text[i % text.len()];
+        }
+        println!(
+            "Allocate Buff - {:.2} GB: {} ms",
+            GB_SIZE,
+            start.elapsed().as_millis()
+        );
+
+        let start = std::time::Instant::now();
+        let buffer = XORCryptor::encrypt_v2(key.as_bytes(), buffer).expect("Failed encryption");
+        let elapsed = start.elapsed().as_millis();
+        println!(
+            "Encrypted: {} ms - {:.2} GBps",
+            elapsed,
+            GB_SIZE / elapsed as f64 * 1000f64
+        );
+
+        let start = std::time::Instant::now();
+        let buffer = XORCryptor::decrypt_v2(key.as_bytes(), buffer).expect("Failed decryption");
+        let elapsed = start.elapsed().as_millis();
+        println!(
+            "Decrypted: {} ms - {:.2} GBps",
+            elapsed,
+            GB_SIZE / elapsed as f64 * 1000f64
+        );
+
+        assert_eq!(
+            sample_text,
+            String::from_utf8(buffer[0..sample_text.len()].to_vec()).unwrap()
+        );
+    }
+}
