@@ -7,24 +7,38 @@ use crate::{
 #[cfg(target_pointer_width = "64")]
 impl XORCryptor {
     fn encrypt_buffer_v2(&self, src: &mut Vec<usize>) {
-        let n = src.len() - 2;
-        for i in 0..n {
-            src[i] = self.encrypt_byte(src[i]) ^ self.cipher.get_cipher_byte(i);
-            src[i] ^= (src[(i - 1 + n) % n]) ^ self.cipher.get_cipher_byte((i - 1 + n) % n);
-            src[i] = ((src[(i - 1 + n) % n] & 0x00FF_00FF_00FF_00FF) << 8) ^ src[i];
+        for l in src.iter_mut().rev().take(2) {
+            *l = self.encrypt_byte(*l);
         }
 
-        let n = src.len();
-        src[n - 1] = self.encrypt_byte(src[n - 1]);
-        src[n - 2] = self.encrypt_byte(src[n - 2]);
+        let n = src.len() - 2;
+        for i in 0..n {
+            let pi = (i - 1 + n) % n;
+            let [mut x, y] = [src[i], src[pi]];
+            let [ci, c_li] = [
+                self.cipher.get_cipher_byte(i),
+                self.cipher.get_cipher_byte(pi),
+            ];
+            let wrap = y & 0x00FF_00FF_00FF_00FF;
+
+            x = self.encrypt_byte(x) ^ ci ^ y ^ c_li;
+            src[i] = (wrap << 8) ^ x;
+        }
     }
 
     fn decrypt_buffer_v2(&self, src: &mut Vec<usize>) {
         let n = src.len() - 2;
         for i in (0..n).rev() {
-            src[i] = ((src[(i - 1 + n) % n] & 0x00FF_00FF_00FF_00FF) << 8) ^ src[i];
-            src[i] ^= (src[(i - 1 + n) % n]) ^ self.cipher.get_cipher_byte((i - 1 + n) % n);
-            src[i] = self.decrypt_byte(src[i] ^ self.cipher.get_cipher_byte(i));
+            let pi = (i - 1 + n) % n;
+            let [mut x, y] = [src[i], src[pi]];
+            let wrap = y & 0x00FF_00FF_00FF_00FF;
+            let [ci, c_li] = [
+                self.cipher.get_cipher_byte(i),
+                self.cipher.get_cipher_byte(pi),
+            ];
+
+            x ^= wrap << 8;
+            src[i] = self.decrypt_byte(x ^ y ^ c_li ^ ci);
         }
     }
 

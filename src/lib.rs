@@ -179,20 +179,15 @@ impl XORCryptor {
     }
 
     #[inline]
-    fn eb(&self, offset: usize) -> usize {
-        self.e_table[offset] as usize
-    }
-
-    #[inline]
     fn encrypt_byte(&self, val: usize) -> usize {
-        self.eb(val & 0xFF)
-            | self.eb((val >> 0x8) & 0xFF) << 0x4
-            | self.eb((val >> 0x10) & 0xFF) << 0x10
-            | self.eb((val >> 0x18) & 0xFF) << 0x14
-            | self.eb((val >> 0x20) & 0xFF) << 0x20
-            | self.eb((val >> 0x28) & 0xFF) << 0x24
-            | self.eb((val >> 0x30) & 0xFF) << 0x30
-            | self.eb((val >> 0x38) & 0xFF) << 0x34
+        self.e_table[val & 0xFF] as usize
+            | (self.e_table[(val >> 0x8) & 0xFF] as usize) << 0x4
+            | (self.e_table[(val >> 0x10) & 0xFF] as usize) << 0x10
+            | (self.e_table[(val >> 0x18) & 0xFF] as usize) << 0x14
+            | (self.e_table[(val >> 0x20) & 0xFF] as usize) << 0x20
+            | (self.e_table[(val >> 0x28) & 0xFF] as usize) << 0x24
+            | (self.e_table[(val >> 0x30) & 0xFF] as usize) << 0x30
+            | (self.e_table[(val >> 0x38) & 0xFF] as usize) << 0x34
     }
 
     fn encrypt_buffer(&self, src: &mut Vec<usize>, b_len: usize) {
@@ -215,12 +210,12 @@ impl XORCryptor {
             let (val, mut shift) = (src[length], 0usize);
             let mut lxi = 0usize;
             while byte_count > 1 {
-                lxi |= self.eb((val >> shift) & 0xFF) << shift
-                    | (self.eb(((val >> 8) >> shift) & 0xFF) << 4) << shift;
+                lxi |= (self.e_table[(val >> shift) & 0xFF] as usize) << shift
+                    | ((self.e_table[((val >> 8) >> shift) & 0xFF] as usize) << 4) << shift;
                 shift += 16;
                 byte_count -= 2;
             }
-            let mut mm = self.eb((val >> shift) & 0xFF);
+            let mut mm = self.e_table[(val >> shift) & 0xFF] as usize;
             mm = ((mm & 0xF00) >> 8) | ((mm & 0xF) << 4);
             mm ^= mm >> 4;
             lxi |= mm << shift;
@@ -230,20 +225,15 @@ impl XORCryptor {
     }
 
     #[inline]
-    fn db(&self, offset: usize) -> usize {
-        self.d_table[offset] as usize
-    }
-
-    #[inline]
     fn decrypt_byte(&self, val: usize) -> usize {
-        self.db(val & 0x0F0F)
-            | self.db((val >> 0x4) & 0x0F0F) << 0x8
-            | self.db((val >> 0x10) & 0x0F0F) << 0x10
-            | self.db((val >> 0x14) & 0x0F0F) << 0x18
-            | self.db((val >> 0x20) & 0x0F0F) << 0x20
-            | self.db((val >> 0x24) & 0x0F0F) << 0x28
-            | self.db((val >> 0x30) & 0x0F0F) << 0x30
-            | self.db((val >> 0x34) & 0x0F0F) << 0x38
+        self.d_table[val & 0x0F0F] as usize
+            | (self.d_table[(val >> 0x4) & 0x0F0F] as usize) << 0x8
+            | (self.d_table[(val >> 0x10) & 0x0F0F] as usize) << 0x10
+            | (self.d_table[(val >> 0x14) & 0x0F0F] as usize) << 0x18
+            | (self.d_table[(val >> 0x20) & 0x0F0F] as usize) << 0x20
+            | (self.d_table[(val >> 0x24) & 0x0F0F] as usize) << 0x28
+            | (self.d_table[(val >> 0x30) & 0x0F0F] as usize) << 0x30
+            | (self.d_table[(val >> 0x34) & 0x0F0F] as usize) << 0x38
     }
 
     fn decrypt_buffer(&self, src: &mut Vec<usize>, b_len: usize) {
@@ -267,15 +257,15 @@ impl XORCryptor {
             let xi = ((src[length] & 0x00FF_00FF_00FF_00FF) << 8) ^ src[length];
             let (mut lxi, mut shift) = (0usize, 0usize);
             while byte_count > 1 {
-                lxi |= self.db((xi >> shift) & 0x0F0F) << shift
-                    | self.db((xi >> shift >> 4) & 0x0F0F) << 8 << shift;
+                lxi |= (self.d_table[(xi >> shift) & 0x0F0F] as usize) << shift
+                    | (self.d_table[(xi >> shift >> 4) & 0x0F0F] as usize) << 8 << shift;
                 shift += 0x10;
                 byte_count -= 2;
             }
             let mut mm = (xi >> shift) & 0xFF;
             mm ^= mm >> 4;
             mm = ((mm & 0xF0) >> 4) | ((mm & 0xF) << 8);
-            lxi |= self.db(mm) << shift;
+            lxi |= (self.d_table[mm] as usize) << shift;
             src[length] = lxi;
         }
     }

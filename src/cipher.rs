@@ -37,6 +37,7 @@ impl Cipher {
         Ok(Cipher { cipher })
     }
 
+    #[inline]
     pub fn get_cipher_byte(&self, i: usize) -> usize {
         self.cipher[i % self.cipher.len()]
     }
