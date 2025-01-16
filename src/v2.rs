@@ -12,33 +12,36 @@ impl XORCryptor {
         }
 
         let n = src.len() - 2;
-        for i in 0..n {
-            let pi = (i - 1 + n) % n;
-            let [mut x, y] = [src[i], src[pi]];
-            let [ci, c_li] = [
-                self.cipher.get_cipher_byte(i),
-                self.cipher.get_cipher_byte(pi),
-            ];
-            let wrap = y & 0x00FF_00FF_00FF_00FF;
+        let mut ps = src[n - 1];
+        let mut p_c = self.cipher.get_cipher_byte(n - 1);
 
-            x = self.encrypt_byte(x) ^ ci ^ y ^ c_li;
-            src[i] = (wrap << 8) ^ x;
+        for i in 0..n {
+            let wrap = ps & 0x00FF_00FF_00FF_00FF;
+            let ci = self.cipher.get_cipher_byte(i);
+
+            let x = self.encrypt_byte(src[i]) ^ ci ^ ps ^ p_c ^ (wrap << 8);
+            src[i] = x;
+
+            ps = x;
+            p_c = ci;
         }
     }
 
     fn decrypt_buffer_v2(&self, src: &mut Vec<usize>) {
         let n = src.len() - 2;
-        for i in (0..n).rev() {
-            let pi = (i - 1 + n) % n;
-            let [mut x, y] = [src[i], src[pi]];
-            let wrap = y & 0x00FF_00FF_00FF_00FF;
-            let [ci, c_li] = [
-                self.cipher.get_cipher_byte(i),
-                self.cipher.get_cipher_byte(pi),
-            ];
+        let mut cs = src[n - 1];
+        let mut c_c = self.cipher.get_cipher_byte(n - 1);
 
-            x ^= wrap << 8;
-            src[i] = self.decrypt_byte(x ^ y ^ c_li ^ ci);
+        for r in (0..n).rev() {
+            let i = if r == 0 { n - 1 } else { r - 1 };
+            let y = src[i];
+            let wrap = y & 0x00FF_00FF_00FF_00FF;
+            let c_li = self.cipher.get_cipher_byte(i);
+
+            src[r] = self.decrypt_byte(cs ^ (wrap << 8) ^ y ^ c_li ^ c_c);
+
+            cs = y;
+            c_c = c_li;
         }
     }
 

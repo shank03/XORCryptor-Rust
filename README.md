@@ -148,12 +148,12 @@ $ cargo test --release --package xor_cryptor --lib -- test::benchmark --exact --
      Running unittests src/lib.rs (target/release/deps/xor_cryptor-9b9862a430980841)
 
 running 1 test
-Allocate Buff - 2.20 GB: 735 ms
-Encrypted: 785 ms - 2.81 GBps
-Decrypted: 978 ms - 2.25 GBps
+Allocate Buff - 2.20 GB: 734 ms
+Encrypted: 601 ms - 3.67 GBps
+Decrypted: 865 ms - 2.55 GBps
 test test::v2::benchmark ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 2.52s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 2.22s
 ```
 
 V1:
