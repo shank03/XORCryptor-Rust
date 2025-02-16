@@ -26,15 +26,18 @@ impl Cipher {
         if key.len() < 6 {
             return Err(XRCError::InvalidKeyLength);
         }
-        let mut cipher = if let Some(seed) = seed {
-            Cipher::x64_cipher_seed(key, seed)
-        } else {
-            Cipher::x64_cipher(key)
+        let mut cipher = match seed {
+            Some(seed) => Cipher::x64_cipher_seed(key, seed),
+            None => Cipher::x64_cipher(key),
         };
         for i in 0..cipher.len() {
             cipher[i] = Cipher::generate_mask(cipher[i]);
         }
         Ok(Cipher { cipher })
+    }
+
+    pub fn empty() -> Self {
+        Cipher { cipher: vec![] }
     }
 
     #[inline]

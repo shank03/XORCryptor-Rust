@@ -113,7 +113,7 @@
 //! Decrypted from vec   : "Hello World !"
 //! ```
 
-use std::{any::TypeId, mem};
+use std::{any::TypeId, marker::PhantomData, mem};
 
 use err::XRCResult;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -124,36 +124,23 @@ mod v2;
 
 pub mod err;
 
+pub trait XrcVersion {}
+pub struct V1;
+impl XrcVersion for V1 {}
+pub struct V2;
+impl XrcVersion for V2 {}
+
 #[cfg(target_pointer_width = "64")]
-pub struct XORCryptor {
+pub struct XORCryptor<T> {
     cipher: cipher::Cipher,
     e_table: Vec<u16>,
     d_table: Vec<u16>,
+    raw_seed: usize,
+    _marker: PhantomData<T>,
 }
 
 #[cfg(target_pointer_width = "64")]
-impl XORCryptor {
-    /// Initialize with the key
-    pub fn new(key: &str) -> XRCResult<Self> {
-        let cipher = cipher::Cipher::from(key)?;
-        Ok(XORCryptor::init(cipher))
-    }
-
-    pub fn new_bytes(key: &[u8]) -> XRCResult<Self> {
-        let cipher = cipher::Cipher::from_bytes(key)?;
-        Ok(XORCryptor::init(cipher))
-    }
-
-    pub fn init(cipher: cipher::Cipher) -> Self {
-        let (mut e_table, mut d_table) = (vec![0u16; 256], vec![0u16; 0xF10]);
-        Self::generate_table(&mut e_table, &mut d_table);
-        XORCryptor {
-            cipher,
-            e_table,
-            d_table,
-        }
-    }
-
+impl<T: XrcVersion> XORCryptor<T> {
     fn generate_table(e_table: &mut Vec<u16>, d_table: &mut Vec<u16>) {
         let (mut count, mut shift, mut value, mut bit_mask): (u16, u16, u16, u16);
         let (mut mask, mut mode) = (0u16, 0u16);
@@ -190,6 +177,44 @@ impl XORCryptor {
             | (self.e_table[(val >> 0x38) & 0xFF] as usize) << 0x34
     }
 
+    #[inline]
+    fn decrypt_byte(&self, val: usize) -> usize {
+        self.d_table[val & 0x0F0F] as usize
+            | (self.d_table[(val >> 0x4) & 0x0F0F] as usize) << 0x8
+            | (self.d_table[(val >> 0x10) & 0x0F0F] as usize) << 0x10
+            | (self.d_table[(val >> 0x14) & 0x0F0F] as usize) << 0x18
+            | (self.d_table[(val >> 0x20) & 0x0F0F] as usize) << 0x20
+            | (self.d_table[(val >> 0x24) & 0x0F0F] as usize) << 0x28
+            | (self.d_table[(val >> 0x30) & 0x0F0F] as usize) << 0x30
+            | (self.d_table[(val >> 0x34) & 0x0F0F] as usize) << 0x38
+    }
+}
+
+#[cfg(target_pointer_width = "64")]
+impl XORCryptor<V1> {
+    /// Initialize with the key
+    pub fn new(key: &str) -> XRCResult<Self> {
+        let cipher = cipher::Cipher::from(key)?;
+        Ok(XORCryptor::init(cipher))
+    }
+
+    pub fn new_bytes(key: &[u8]) -> XRCResult<Self> {
+        let cipher = cipher::Cipher::from_bytes(key)?;
+        Ok(XORCryptor::init(cipher))
+    }
+
+    fn init(cipher: cipher::Cipher) -> Self {
+        let (mut e_table, mut d_table) = (vec![0u16; 256], vec![0u16; 0xF10]);
+        Self::generate_table(&mut e_table, &mut d_table);
+        XORCryptor {
+            cipher,
+            e_table,
+            d_table,
+            raw_seed: 0,
+            _marker: PhantomData,
+        }
+    }
+
     fn encrypt_buffer(&self, src: &mut Vec<usize>, b_len: usize) {
         let mut byte_count = b_len;
         let odd = b_len % 8 != 0;
@@ -222,18 +247,6 @@ impl XORCryptor {
             lxi = ((lxi & 0x00FF_00FF_00FF_00FF) << 8) ^ lxi;
             src[length] = lxi ^ self.cipher.get_cipher_byte(length);
         }
-    }
-
-    #[inline]
-    fn decrypt_byte(&self, val: usize) -> usize {
-        self.d_table[val & 0x0F0F] as usize
-            | (self.d_table[(val >> 0x4) & 0x0F0F] as usize) << 0x8
-            | (self.d_table[(val >> 0x10) & 0x0F0F] as usize) << 0x10
-            | (self.d_table[(val >> 0x14) & 0x0F0F] as usize) << 0x18
-            | (self.d_table[(val >> 0x20) & 0x0F0F] as usize) << 0x20
-            | (self.d_table[(val >> 0x24) & 0x0F0F] as usize) << 0x28
-            | (self.d_table[(val >> 0x30) & 0x0F0F] as usize) << 0x30
-            | (self.d_table[(val >> 0x34) & 0x0F0F] as usize) << 0x38
     }
 
     fn decrypt_buffer(&self, src: &mut Vec<usize>, b_len: usize) {
