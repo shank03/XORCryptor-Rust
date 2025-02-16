@@ -188,6 +188,10 @@ impl<T: XrcVersion> XORCryptor<T> {
             | (self.d_table[(val >> 0x30) & 0x0F0F] as usize) << 0x30
             | (self.d_table[(val >> 0x34) & 0x0F0F] as usize) << 0x38
     }
+
+    pub fn get_cipher(&self) -> &[usize] {
+        self.cipher.get_cipher()
+    }
 }
 
 #[cfg(target_pointer_width = "64")]
@@ -319,10 +323,6 @@ impl XORCryptor<V1> {
         let mut src = transmute_buffer::<u8, usize>(buffer, 0, 0, Version::V1);
         self.decrypt_buffer(&mut src, b_len);
         transmute_buffer(src, b_len, 0, Version::V1)
-    }
-
-    pub fn get_cipher(&self) -> &[usize] {
-        self.cipher.get_cipher()
     }
 }
 
