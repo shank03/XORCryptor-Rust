@@ -16,7 +16,7 @@ impl XORCryptor<V2> {
             cipher,
             e_table,
             d_table,
-            raw_seed: seed.unwrap_or(
+            raw_seed: seed.map(|s| s.max(1)).unwrap_or(
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
